@@ -21,6 +21,7 @@ export interface IStorage {
   createContactsBulk(contacts: InsertContact[]): Promise<Contact[]>;
   getContactByEmail(email: string, accountId?: string): Promise<Contact | undefined>;
   getAllContacts(accountId?: string): Promise<Contact[]>;
+  deleteContactByEmail(email: string, accountId: string): Promise<void>; // <-- ADDED THIS METHOD
   createEmailLog(emailLog: InsertEmailLog): Promise<EmailLog>;
   getAllEmailLogs(accountId?: string): Promise<EmailLog[]>;
   createImportJob(job: InsertImportJob): Promise<ImportJob>;
@@ -174,6 +175,19 @@ export class MemStorage implements IStorage {
     return accountId ? allContacts.filter(contact => contact.accountId === accountId) : allContacts;
   }
 
+  async deleteContactByEmail(email: string, accountId: string): Promise<void> {
+    let contactIdToDelete: string | undefined;
+    for (const [id, contact] of this.contacts.entries()) {
+      if (contact.email === email && contact.accountId === accountId) {
+        contactIdToDelete = id;
+        break;
+      }
+    }
+    if (contactIdToDelete) {
+      this.contacts.delete(contactIdToDelete);
+    }
+  }
+
   async createEmailLog(insertEmailLog: InsertEmailLog): Promise<EmailLog> {
     const id = randomUUID();
     const emailLog: EmailLog = {
@@ -251,14 +265,14 @@ export class MemStorage implements IStorage {
   async createAnalyticsEvent(event: Partial<AnalyticsEvent>): Promise<AnalyticsEvent> {
     const id = randomUUID();
     const newEvent: AnalyticsEvent = {
-        id,
-        accountId: event.accountId || null,
-        eventName: event.eventName || "unknown",
-        sourceType: event.sourceType || "unknown",
-        sourceId: event.sourceId || null,
-        contactEmail: event.contactEmail || "unknown",
-        eventTime: new Date(),
-        payload: event.payload || {}
+      id,
+      accountId: event.accountId || null,
+      eventName: event.eventName || "unknown",
+      sourceType: event.sourceType || "unknown",
+      sourceId: event.sourceId || null,
+      contactEmail: event.contactEmail || "unknown",
+      eventTime: new Date(),
+      payload: event.payload || {}
     };
     this.analyticsEvents.set(id, newEvent);
     return newEvent;

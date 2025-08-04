@@ -7,7 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
-import type { LoopsAccount } from "@shared/schema";
+import { cn } from "@/lib/utils";
+import type { LoopsAccount, ImportJob } from "@shared/schema";
 
 interface AccountSelectorProps {
   selectedAccountId: string | null;
@@ -30,6 +31,12 @@ export default function AccountSelector({ selectedAccountId, onAccountChange }: 
         }
       }
     },
+  });
+
+  const { data: jobs = [], isLoading: isLoadingJobs } = useQuery<ImportJob[]>({
+    queryKey: ['/api/import-jobs'],
+    queryFn: () => api.getImportJobs(),
+    refetchInterval: 1000,
   });
 
   const testConnectionMutation = useMutation({
@@ -76,7 +83,18 @@ export default function AccountSelector({ selectedAccountId, onAccountChange }: 
 
   const selectedAccount = accounts.find((acc: LoopsAccount) => acc.id === selectedAccountId);
 
-  if (isLoading) {
+  const getJobStatus = (accountId: string) => {
+    const job = jobs.find(j => j.accountId === accountId && (j.status === 'running' || j.status === 'pending' || j.status === 'paused'));
+    if (job) {
+        const processed = job.processedEmails;
+        const total = job.totalEmails;
+        const status = job.status;
+        return `${processed}/${total} ${status.charAt(0).toUpperCase() + status.slice(1)}`;
+    }
+    return null;
+  }
+  
+  if (isLoading || isLoadingJobs) {
     return (
       <Card className="glass-card mb-6">
         <CardContent className="p-4">
@@ -120,8 +138,11 @@ export default function AccountSelector({ selectedAccountId, onAccountChange }: 
             <SelectContent>
               {accounts.map((account: LoopsAccount) => (
                 <SelectItem key={account.id} value={account.id}>
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-center justify-between w-full">
                     <span>{account.name}</span>
+                    <span className="text-xs text-slate-500 ml-2">
+                        {getJobStatus(account.id) || "No active jobs"}
+                    </span>
                   </div>
                 </SelectItem>
               ))}

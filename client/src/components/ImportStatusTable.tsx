@@ -35,10 +35,11 @@ export default function ImportStatusTable({ jobInfo }: ImportStatusTableProps) {
       return "Subscriber added successfully.";
     }
     const message = log.message;
-    if (message.includes("already on list")) {
+    if (typeof message === 'string' && message.includes("already on list")) {
       return "Failed: Email already on list.";
     }
-    return "Failed: " + (message || "Unknown error.");
+    // A simple, clear message for other errors
+    return "Failed: " + (typeof message === 'string' ? message : "Unknown error.");
   };
 
   return (
@@ -56,7 +57,7 @@ export default function ImportStatusTable({ jobInfo }: ImportStatusTableProps) {
                 <TableHead className="w-[120px]">Full Response</TableHead>
               </TableRow>
             </TableHeader>
-            <TableBody key={jobInfo?.processedEmails} ref={tableRef}>
+            <TableBody ref={tableRef}>
               {jobInfo?.logs && jobInfo.logs.length > 0 ? (
                 jobInfo.logs.map((log, index) => (
                   <TableRow

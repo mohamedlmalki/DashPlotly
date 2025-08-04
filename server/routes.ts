@@ -7,7 +7,8 @@ import {
   createAccountSchema,
   jobControlSchema,
   loopsEventSchema,
-  BulkImportRequest
+  BulkImportRequest,
+  singleContactSchema
 } from "@shared/schema";
 import { z } from "zod";
 import fetch from 'node-fetch';
@@ -405,7 +406,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // New analytics endpoints
+  // NEW ENDPOINT TO FIND A CONTACT
+  app.get("/api/loops/contacts/find", async (req, res) => {
+    const { accountId, email } = req.query;
+
+    if (!accountId || typeof accountId !== 'string' || !email || typeof email !== 'string') {
+      return res.status(400).json({ message: "accountId and email are required." });
+    }
+
+    const account = await storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ message: "Account not found." });
+    }
+
+    try {
+      const loopsResponse = await callLoopsApi(
+        `/contacts/find?email=${encodeURIComponent(email)}`,
+        account.apiKey,
+        {},
+        "GET"
+      );
+      res.json(loopsResponse);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to find contact.", error: error instanceof Error ? error.message : "Unknown error" });
+    }
+  });
+  
+  // NEW ENDPOINT TO DELETE A CONTACT
+  app.post("/api/loops/contacts/delete", async (req, res) => {
+    const { accountId, email } = req.body;
+
+    if (!accountId || !email) {
+      return res.status(400).json({ message: "accountId and email are required." });
+    }
+
+    const account = await storage.getAccountById(accountId);
+    if (!account) {
+      return res.status(404).json({ message: "Account not found." });
+    }
+
+    try {
+      const loopsResponse = await callLoopsApi(
+        "/contacts/delete",
+        account.apiKey,
+        { email },
+        "POST"
+      );
+      // Delete the contact from the local database as well
+      await storage.deleteContactByEmail(email, accountId);
+      res.json(loopsResponse);
+    } catch (error) {
+      res.status(500).json({ message: "Failed to delete contact.", error: error instanceof Error ? error.message : "Unknown error" });
+    }
+  });
+
   app.get("/api/loops/analytics/loops", async (req, res) => {
     try {
       const accountId = req.query.accountId as string;
@@ -491,6 +545,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         console.error("Webhook processing error:", error);
         res.status(500).json({ success: false, message: "Internal server error." });
+      }
+    }
+  });
+
+  // NEW ROUTE FOR SINGLE CONTACT IMPORT
+  app.post("/api/loops/import-contact", async (req, res) => {
+    try {
+      const { email, accountId } = singleContactSchema.parse(req.body);
+
+      const account = await storage.getAccountById(accountId);
+      if (!account || account.isActive !== "true") {
+        return res.status(400).json({ success: false, message: "Invalid or inactive Loops.so account selected." });
+      }
+      const loopsApiKey = account.apiKey;
+
+      const loopsResponse = await callLoopsApi(
+        "/contacts/create",
+        loopsApiKey,
+        { email: email }
+      );
+      
+      // Also store the new contact in our local database
+      await storage.createContact({ email, accountId: accountId });
+      
+      res.status(200).json({
+        success: true,
+        message: `Contact ${email} successfully added.`,
+        data: loopsResponse
+      });
+
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({
+          success: false,
+          message: "Invalid request data",
+          errors: error.errors
+        });
+      } else {
+        console.error('Error adding single contact:', error);
+        res.status(500).json({
+          success: false,
+          message: "Failed to add contact to Loops.so.",
+          error: error instanceof Error ? error.message : "Unknown error"
+        });
       }
     }
   });

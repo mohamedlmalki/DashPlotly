@@ -88,6 +88,12 @@ export const bulkImportSchema = z.object({
   delay: z.number().min(0).default(500),
 });
 
+// NEW SCHEMA FOR SINGLE IMPORT
+export const singleContactSchema = z.object({
+  accountId: z.string().min(1, "Account is required"),
+  email: z.string().email("Invalid email address"),
+});
+
 export const sendEmailSchema = z.object({
   recipients: z.array(z.string().email("Invalid email address")),
   subject: z.string().min(1, "Subject is required"),
@@ -133,6 +139,7 @@ export type InsertEmailLog = z.infer<typeof insertEmailLogSchema>;
 export type ImportJob = typeof importJobs.$inferSelect;
 export type InsertImportJob = z.infer<typeof insertImportJobSchema>;
 export type BulkImportRequest = z.infer<typeof bulkImportSchema>;
+export type SingleContactRequest = z.infer<typeof singleContactSchema>; // ADDED NEW TYPE
 export type SendEmailRequest = z.infer<typeof sendEmailSchema>;
 export type CreateAccountRequest = z.infer<typeof createAccountSchema>;
 export type JobControlRequest = z.infer<typeof jobControlSchema>;

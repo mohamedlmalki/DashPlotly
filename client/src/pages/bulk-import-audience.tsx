@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Users, Loader2, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,22 +11,28 @@ import FileUpload from "@/components/ui/file-upload";
 import AccountSelector from "@/components/account-selector";
 import JobControl from "@/components/job-control";
 import ImportStatusTable from "@/components/ImportStatusTable";
+import { SubscriberSearch } from "@/components/SubscriberSearch";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { useJobManager } from "@/hooks/use-job-manager";
 import { cn } from "@/lib/utils";
 import type { ImportJob } from "@shared/schema";
 
 export default function BulkImportAudience() {
-  const [emails, setEmails] = useState("");
+  const [emailsByAccount, setEmailsByAccount] = useState<Map<string, string>>(new Map());
   const [delay, setDelay] = useState(1); // Delay in seconds
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
-  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
-  const [jobStatus, setJobStatus] = useState<string>("completed");
-  const [jobData, setJobData] = useState<ImportJob | null>(null);
-  const [countdown, setCountdown] = useState(delay);
 
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { getJobByAccountId, setJob, clearJob } = useJobManager();
+
+  const jobData = getJobByAccountId(selectedAccountId || '');
+  const currentJobId = jobData?.id || null;
+  const jobStatus = jobData?.status || "completed";
+
+  const currentEmails = selectedAccountId ? emailsByAccount.get(selectedAccountId) || '' : '';
+  const recipientCount = currentEmails.trim().split('\n').filter(email => email.trim() !== '').length;
 
   const importMutation = useMutation({
     mutationFn: (data: { emails: string[]; accountId: string; delay: number }) => api.importContacts(data),
@@ -35,8 +41,16 @@ export default function BulkImportAudience() {
         title: "Import Started",
         description: data.message,
       });
-      setCurrentJobId(data.jobId || null);
-      setJobStatus("running");
+      setJob({
+        id: data.jobId,
+        accountId: selectedAccountId,
+        totalEmails: recipientCount.toString(),
+        processedEmails: "0",
+        status: "pending",
+        createdAt: new Date(),
+        completedAt: null,
+        logs: []
+      });
     },
     onError: (error: any) => {
       toast({
@@ -44,65 +58,46 @@ export default function BulkImportAudience() {
         description: error.message || "Failed to start import job",
         variant: "destructive",
       });
-      setCurrentJobId(null);
-      setJobStatus("completed");
     }
   });
 
-  const { data: fetchedJobInfo, refetch } = useQuery({
+  const { data: fetchedJobInfo } = useQuery({
     queryKey: ['/api/import-jobs', currentJobId],
     queryFn: () => currentJobId ? api.getImportJob(currentJobId) : Promise.resolve(null),
     enabled: !!currentJobId,
+    refetchInterval: (query) => {
+      const job = query.state.data;
+      if (job?.status === "running" || job?.status === "pending") {
+        return 1000;
+      }
+      return false;
+    },
   });
 
   useEffect(() => {
     if (fetchedJobInfo) {
-      setJobData(fetchedJobInfo);
-      setJobStatus(fetchedJobInfo.status);
+      setJob(fetchedJobInfo);
+    }
+  }, [fetchedJobInfo, setJob]);
 
-      if (fetchedJobInfo.status === "completed" || fetchedJobInfo.status === "stopped") {
-        setCurrentJobId(null);
+  useEffect(() => {
+    if (jobData?.status === "completed" || jobData?.status === "stopped") {
+      const timer = setTimeout(() => {
+        clearJob(jobData.id);
         queryClient.invalidateQueries({ queryKey: ['/api/contacts'] });
-      }
+      }, 5000);
+      return () => clearTimeout(timer);
     }
-  }, [fetchedJobInfo, queryClient]);
+  }, [jobData, clearJob, queryClient]);
 
-  const isJobRunning = currentJobId || importMutation.isPending;
-
-  useEffect(() => {
-    let intervalId: NodeJS.Timeout | undefined;
-    if (jobStatus === "running" || jobStatus === "pending") {
-      intervalId = setInterval(() => {
-        refetch();
-      }, 1000);
-    }
-    return () => {
-        if (intervalId) {
-            clearInterval(intervalId);
-        }
-    };
-  }, [jobStatus, refetch]);
-
-  useEffect(() => {
-    let timer: NodeJS.Timeout | undefined;
-    if (isJobRunning && jobData?.processedEmails && jobData.processedEmails !== jobData.totalEmails) {
-      setCountdown(delay);
-      timer = setInterval(() => {
-        setCountdown((prevCountdown) => (prevCountdown > 0 ? prevCountdown - 1 : delay));
-      }, 1000);
-    }
-    return () => {
-        if (timer) {
-            clearInterval(timer);
-        }
-    };
-  }, [jobData?.processedEmails, isJobRunning, delay, jobData?.totalEmails]);
-
-  const showStatusSection = currentJobId || jobData;
-  const recipientCount = emails.trim().split('\n').filter(email => email.trim() !== '').length;
+  const isJobRunning = jobStatus !== "completed" && jobStatus !== "stopped";
 
   const handleFileUpload = (content: string, filename: string) => {
-    setEmails(content);
+    setEmailsByAccount(prev => {
+        const newMap = new Map(prev);
+        newMap.set(selectedAccountId!, content);
+        return newMap;
+    });
     toast({
       title: "File imported",
       description: `File "${filename}" imported successfully!`,
@@ -118,8 +113,8 @@ export default function BulkImportAudience() {
       });
       return;
     }
-
-    const emailList = emails
+    
+    const emailList = currentEmails
       .trim()
       .split('\n')
       .map(email => email.trim())
@@ -134,18 +129,60 @@ export default function BulkImportAudience() {
       return;
     }
 
+    if (isJobRunning) {
+      toast({
+        title: "Error",
+        description: "An import job is already running for this account.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     importMutation.mutate({ 
       emails: emailList,
       accountId: selectedAccountId,
-      delay: delay * 1000 // Convert seconds to milliseconds
+      delay: delay * 1000
     });
   };
 
   const handleClearEmails = () => {
-    setEmails("");
+    if (selectedAccountId) {
+      setEmailsByAccount(prev => {
+        const newMap = new Map(prev);
+        newMap.set(selectedAccountId, '');
+        return newMap;
+      });
+    }
+  };
+  
+  const handleEmailsChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (selectedAccountId) {
+      setEmailsByAccount(prev => {
+        const newMap = new Map(prev);
+        newMap.set(selectedAccountId, e.target.value);
+        return newMap;
+      });
+    }
+  };
+  
+  const handleAccountChange = (accountId: string) => {
+    setSelectedAccountId(accountId);
   };
 
   const progress = jobData?.totalEmails ? (Number(jobData.processedEmails) / Number(jobData.totalEmails)) * 100 : 0;
+
+  const getCountdown = () => {
+    if (jobData?.status === 'running') {
+      const lastLog = jobData.logs[jobData.logs.length - 1];
+      const lastUpdate = lastLog ? new Date(lastLog.timestamp).getTime() : new Date(jobData.createdAt).getTime();
+      const timeElapsed = (Date.now() - lastUpdate) / 1000;
+      const timeLeft = Math.max(0, delay - timeElapsed);
+      return Math.round(timeLeft);
+    }
+    return delay;
+  };
+
+  const showStatusSection = isJobRunning || (jobData && (jobData.status === 'completed' || jobData.status === 'stopped'));
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-fade-in">
@@ -156,20 +193,26 @@ export default function BulkImportAudience() {
 
       <AccountSelector
         selectedAccountId={selectedAccountId}
-        onAccountChange={setSelectedAccountId}
+        onAccountChange={handleAccountChange}
       />
+      
+      <Card className="glass-card mb-8">
+        <CardContent className="p-8">
+          <SubscriberSearch selectedAccountId={selectedAccountId} />
+        </CardContent>
+      </Card>
 
       <Card className="glass-card">
         <CardContent className="p-8">
           <div className="space-y-6">
-            {/* Input Form Section */}
             <div className="space-y-6">
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <Label className="text-sm font-semibold text-slate-700">Recipient Emails</Label>
                   <div className="flex items-center space-x-2">
                     <span className="text-sm font-medium text-slate-600">
-                      {recipientCount} Recipient{recipientCount !== 1 ? 's' : ''}
+                      {recipientCount} Recipient
+                      {recipientCount !== 1 ? 's' : ''}
                     </span>
                     {recipientCount > 0 && (
                       <Button
@@ -186,8 +229,8 @@ export default function BulkImportAudience() {
                 </div>
                 <div className="relative">
                   <Textarea
-                    value={emails}
-                    onChange={(e) => setEmails(e.target.value)}
+                    value={currentEmails}
+                    onChange={handleEmailsChange}
                     placeholder="Enter email addresses, one per line..."
                     className="textarea-premium h-40 text-sm placeholder-slate-400"
                     disabled={isJobRunning}
@@ -224,7 +267,7 @@ export default function BulkImportAudience() {
               <div className="flex items-center justify-end pt-4">
                 <Button
                   onClick={handleImport}
-                  disabled={isJobRunning || recipientCount === 0 || !selectedAccountId}
+                  disabled={isJobRunning || currentEmails.trim().length === 0 || !selectedAccountId}
                   className="btn-primary px-6 py-2.5 rounded-xl"
                 >
                   {isJobRunning ? (
@@ -237,25 +280,23 @@ export default function BulkImportAudience() {
               </div>
             </div>
 
-            {/* Status Log Section */}
             {showStatusSection && (
               <div className="mt-8 space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-semibold text-slate-800 flex items-center space-x-2">
                     <Loader2 className={cn("h-5 w-5 text-primary", isJobRunning && "animate-spin")} />
-                    <span>Import {isJobRunning ? "in Progress" : "Complete"}</span>
+                    <span>Import in Progress</span>
                   </h3>
                   <JobControl
-                    jobId={currentJobId}
-                    status={jobStatus}
-                    onStatusChange={setJobStatus}
+                    jobId={jobData?.id}
+                    status={jobData?.status || "completed"}
                     variant="import"
                   />
                 </div>
                 <div className="flex items-center space-x-4">
                   <Progress value={progress} className="h-2 flex-1" />
                   <span className="text-sm font-medium text-slate-600">
-                    {isJobRunning ? `Next in ${countdown}s` : `${Math.round(progress)}%`}
+                    {isJobRunning ? `Next in ${getCountdown()}s` : `${Math.round(progress)}%`}
                   </span>
                 </div>
                 <div className="text-sm text-slate-600">

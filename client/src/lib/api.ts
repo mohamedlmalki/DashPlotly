@@ -5,7 +5,8 @@ import type {
   CreateAccountRequest,
   JobControlRequest,
   LoopsAccount,
-  ImportJob
+  ImportJob,
+  SingleContactRequest
 } from "@shared/schema";
 
 export interface BulkImportResponse {
@@ -33,6 +34,22 @@ export interface TestConnectionResponse {
   data?: any;
 }
 
+export interface ContactInfo {
+  id: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  source: string;
+  subscribed: boolean;
+  userGroup: string;
+  userId: string | null;
+  mailingLists: Record<string, boolean>;
+}
+
+export interface FindContactResponse {
+  contacts: ContactInfo[];
+}
+
 export const api = {
   // Account management
   getAccounts: async (): Promise<LoopsAccount[]> => {
@@ -48,6 +65,24 @@ export const api = {
   // Contact operations
   importContacts: async (data: BulkImportRequest): Promise<BulkImportResponse> => {
     const response = await apiRequest('POST', '/api/loops/import-contacts', data);
+    return response.json();
+  },
+
+  addSingleContact: async (accountId: string, email: string): Promise<any> => {
+    const data: SingleContactRequest = { accountId, email };
+    const response = await apiRequest('POST', '/api/loops/import-contact', data);
+    return response.json();
+  },
+
+  findContactByEmail: async (accountId: string, email: string): Promise<FindContactResponse> => {
+    const encodedEmail = encodeURIComponent(email);
+    const url = `/api/loops/contacts/find?accountId=${accountId}&email=${encodedEmail}`;
+    const response = await apiRequest('GET', url);
+    return response.json();
+  },
+
+  deleteContactByEmail: async (accountId: string, email: string): Promise<any> => {
+    const response = await apiRequest('POST', '/api/loops/contacts/delete', { accountId, email });
     return response.json();
   },
 

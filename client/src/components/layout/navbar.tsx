@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Users, Mail, Zap, BarChart3 } from "lucide-react";
+import { Users, Mail, Zap, BarChart3, Upload } from "lucide-react"; // <-- ADDED 'Upload' icon
 
 export default function Navbar() {
   const [location] = useLocation();
@@ -10,6 +10,12 @@ export default function Navbar() {
       path: '/bulk-import-audience',
       label: 'Bulk Import Audience',
       icon: Users
+    },
+    {
+      id: 'single-import', // <-- ADDED THIS NEW NAVIGATION ITEM
+      path: '/single-import',
+      label: 'Single Import Audience',
+      icon: Upload
     },
     {
       id: 'send-email',
